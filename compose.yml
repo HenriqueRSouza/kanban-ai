@@ -1,0 +1,131 @@
+# TaskFlow distribuído — Docker Compose (etapa 1 do projeto de Serviços em Nuvem).
+#
+#   navegador ──▶ nginx ──▶ api (Serviço A) ──▶ rabbitmq ──▶ worker (Serviço B) ──▶ ollama
+#                  │            │                   ▲              │
+#                  │            └──▶ db             └──────────────┘ resultado volta pela fila
+#
+# Redes:
+#   edge     → nginx e api: o único caminho de fora para dentro.
+#   internal → api, worker, rabbitmq, db e ollama. O nginx não participa dela.
+# Só o nginx publica porta. Configuração e senhas vêm do .env (cp .env.example .env).
+
+services:
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    ports:
+      - "${APP_PORT:-8080}:80"
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      PORT: "3000"
+      DATABASE_URL: postgres://${POSTGRES_USER:?crie o .env com cp .env.example .env}:${POSTGRES_PASSWORD:?crie o .env com cp .env.example .env}@db:5432/${POSTGRES_DB:-taskflow}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:?crie o .env com cp .env.example .env}:${RABBITMQ_PASSWORD:?crie o .env com cp .env.example .env}@rabbitmq:5672
+    networks: [edge, internal]
+    # A API não depende do RabbitMQ para subir: sem broker, os pedidos ficam
+    # em 'pending_publish' e são publicados quando ele voltar.
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-120000}
+    networks: [internal]
+    # Para o LM Studio rodando na máquina (host.docker.internal também no Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+        # Com LM Studio ou OpenRouter o perfil "ollama" fica desligado.
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-taskflow}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./api/migrations:/docker-entrypoint-initdb.d:ro
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    profiles: [ollama]
+    build:
+      context: ollama
+      args:
+        OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:1.7b}
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  edge:
+  internal:
+    # Rede isolada, sem saída para a internet. Com LM Studio ou OpenRouter, o
+    # compose.external-llm.yml dá ao worker uma rede extra com saída.
+    internal: true
+
+volumes:
+  pgdata:
+  rabbitmq-data:

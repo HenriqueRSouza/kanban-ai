@@ -1,0 +1,9 @@
+# Provedor de LLM fora do Compose (LM Studio na máquina ou OpenRouter na internet).
+# A rede "internal" não tem saída, então o worker ganha a rede "egress".
+# Ative pelo .env:  COMPOSE_FILE=compose.yml:compose.external-llm.yml
+services:
+  worker:
+    networks: [internal, egress]
+
+networks:
+  egress:

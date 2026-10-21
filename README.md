@@ -31,35 +31,43 @@ O usuário cria colunas e cartões, arrasta tudo com mouse, toque ou teclado, ed
 Pré-requisito: [Docker Desktop](https://www.docker.com/products/docker-desktop/).
 
 ```bash
-git clone https://github.com/HenriqueRSouza/taskflow-kanban.git
-cd taskflow-kanban
-docker compose up --build
+git clone https://github.com/HenriqueRSouza/kanban-ai.git
+cd kanban-ai
+cp .env.example .env          # já vem pronto para o Ollama local; troque as senhas se quiser
+docker compose up --build     # o primeiro build leva alguns minutos (imagem do modelo, ~1,4 GB)
 ```
 
-| Serviço | Endereço |
+A aplicação fica em **http://localhost:8080**. O NGINX é o único ponto de entrada: a API, o banco, o RabbitMQ, o worker e o Ollama ficam só na rede interna. Na primeira execução o banco é criado com um quadro de exemplo.
+
+| Container | Papel |
 |---|---|
-| Aplicação | http://localhost:5173 |
-| API | http://localhost:3000/api/board |
-| PostgreSQL | `localhost:5432` (usuário, senha e banco: `taskflow`) |
+| `nginx` | Entrada única: serve o front e encaminha `/api` para a API |
+| `api` | Serviço A: CRUD do quadro e produtor dos pedidos do Agente de IA |
+| `worker` | Serviço B: consome os pedidos e gera os cartões com o LLM |
+| `rabbitmq` | Broker entre A e B (filas duráveis) |
+| `db` | PostgreSQL |
+| `ollama` | LLM local com o modelo `qwen3:1.7b` embutido (perfil `ollama`) |
 
-Na primeira execução o banco é criado com um quadro de exemplo.
-
-> **Já tinha o banco criado antes do histórico de movimentação?** O PostgreSQL só executa as migrations na criação do banco. Aplique a nova uma vez (ela pode ser executada mais de uma vez sem problema):
-> ```bash
-> docker compose exec -T db psql -U taskflow -d taskflow < api/migrations/003_card_history.sql
-> ```
+O provedor do Agente de IA (Ollama, LM Studio ou OpenRouter) é escolhido no `.env`; as três configurações estão comentadas no `.env.example`.
 
 - **Parar:** `docker compose down`
-- **Apagar também os dados do banco:** `docker compose down -v`
-- **Testar no celular** (mesma rede Wi-Fi): acesse `http://<IP-do-computador>:5173` — no macOS o IP aparece com `ipconfig getifaddr en0`.
+- **Apagar também os dados:** `docker compose down -v`
+- **Painel do RabbitMQ** (só nesta máquina, para desenvolvimento e demonstração): `docker compose -f compose.yml -f compose.debug.yml up -d` e abra http://localhost:15672 com o usuário e a senha do `.env`
+- **Seguir uma operação nos logs:** `docker compose logs -f | grep <X-Request-Id>` (o id volta no header `X-Request-Id` de toda resposta)
+- **Testar no celular** (mesma rede Wi-Fi): acesse `http://<IP-do-computador>:8080` — no macOS o IP aparece com `ipconfig getifaddr en0`.
+
+> **Banco criado antes de alguma migration?** O PostgreSQL só executa as migrations na criação do banco. Aplique a que faltar (todas podem ser reaplicadas sem problema), por exemplo:
+> ```bash
+> docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < api/migrations/006_ai_jobs.sql
+> ```
 
 ### Sem Docker (opcional)
 
-Requer Node.js 22 e um PostgreSQL com as migrations de `api/migrations/` aplicadas.
+Requer Node.js 22, um PostgreSQL com as migrations de `api/migrations/` aplicadas e, para o Agente de IA, um RabbitMQ (as variáveis estão no fim do `.env.example`).
 
 ```bash
 npm install
-DATABASE_URL=postgres://taskflow:taskflow@localhost:5432/taskflow npm run dev:api
+DATABASE_URL=postgres://<usuario>:<senha>@localhost:5432/taskflow npm run dev:api
 npm run dev:web
 ```
 

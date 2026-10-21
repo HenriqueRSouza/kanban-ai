@@ -1,0 +1,12 @@
+# Só para desenvolvimento e para a demonstração: expõe o painel de gestão do
+# RabbitMQ em 127.0.0.1 (apenas nesta máquina). Não faz parte da aplicação:
+# o cliente continua acessando tudo pelo NGINX.
+#   docker compose -f compose.yml -f compose.debug.yml up -d
+services:
+  rabbitmq:
+    networks: [internal, debug]
+    ports:
+      - "127.0.0.1:15672:15672"
+
+networks:
+  debug:

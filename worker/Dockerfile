@@ -1,0 +1,11 @@
+FROM node:22-alpine
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY packages/shared/package.json ./packages/shared/package.json
+COPY web/package.json ./web/package.json
+COPY api/package.json ./api/package.json
+COPY worker/package.json ./worker/package.json
+RUN npm ci
+COPY . .
+EXPOSE 8080
+CMD ["npm", "run", "dev", "-w", "worker"]

@@ -235,10 +235,12 @@ export function createSyncEngine(repo: BoardRepository, board: BoardStoreApi, op
    * Carga inicial: primeiro envia o que ficou pendente (ex.: editado offline),
    * depois baixa o quadro do servidor, que passa a ser a fonte da verdade.
    * Se o servidor não responder, o app segue com os dados do localStorage.
+   * Devolve se o quadro do servidor foi aplicado: quem precisa ver dados novos
+   * (ex.: cartões do Agente de IA) tenta de novo quando for adiado.
    */
-  async function loadFromServer(): Promise<void> {
+  async function loadFromServer(): Promise<boolean> {
     await flush();
-    if (outbox.size > 0) return; // não conseguiu enviar: mantém os dados locais
+    if (outbox.size > 0) return false; // não conseguiu enviar: mantém os dados locais
     updateInfo({ status: "syncing" });
     const versionBefore = version;
     try {
@@ -248,8 +250,10 @@ export function createSyncEngine(repo: BoardRepository, board: BoardStoreApi, op
       const changedMeanwhile = version !== versionBefore || outbox.size > 0 || paused;
       if (!changedMeanwhile) applyServerBoard(snapshot);
       updateInfo({ status: "idle", lastSyncedAt: new Date().toISOString(), lastError: null });
+      return !changedMeanwhile;
     } catch (error) {
       updateInfo({ status: error instanceof NetworkError ? "offline" : "error", lastError: describeError(error) });
+      return false;
     }
   }
 

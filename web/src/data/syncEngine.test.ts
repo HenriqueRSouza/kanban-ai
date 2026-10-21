@@ -247,7 +247,7 @@ describe('createSyncEngine', () => {
     await vi.advanceTimersByTimeAsync(0);
     const id = addCard();
     release();
-    await loading;
+    expect(await loading).toBe(false);
     expect(useBoardStore.getState().cards[id]).toBeDefined();
     await vi.advanceTimersByTimeAsync(100);
     expect(repo.calls).toContain(`upsertCard:${id}`);
@@ -272,7 +272,7 @@ describe('createSyncEngine', () => {
       id: crypto.randomUUID(), title: 'Quadro remoto', ...denormalize(createDefaultBoard()),
     });
     const snapshot = repo.snapshot;
-    await engine.loadFromServer();
+    expect(await engine.loadFromServer()).toBe(true);
     expect(denormalize(useBoardStore.getState())).toEqual({
       columns: snapshot.columns, cards: snapshot.cards, tags: snapshot.tags,
     });
@@ -294,7 +294,7 @@ describe('createSyncEngine', () => {
   it('mantém o quadro local quando a busca está offline', async () => {
     const before = useBoardStore.getState();
     repo.failWith(new NetworkError(new Error('Sem rede')));
-    await engine.loadFromServer();
+    expect(await engine.loadFromServer()).toBe(false);
     expect(repo.calls).toEqual(['fetchBoard']);
     expect(useBoardStore.getState()).toBe(before);
     expect(useSyncStore.getState()).toMatchObject({ status: 'offline', pending: 0 });
@@ -304,7 +304,7 @@ describe('createSyncEngine', () => {
     const id = addCard();
     const before = useBoardStore.getState();
     repo.failWith(new NetworkError(new Error('Sem rede')));
-    await engine.loadFromServer();
+    expect(await engine.loadFromServer()).toBe(false);
     expect(repo.calls).toEqual([`upsertCard:${id}`]);
     expect(useBoardStore.getState()).toBe(before);
     expect(useSyncStore.getState()).toMatchObject({ status: 'offline', pending: 1 });

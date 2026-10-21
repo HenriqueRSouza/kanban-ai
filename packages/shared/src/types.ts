@@ -14,6 +14,16 @@ import type {
   UpsertColumnSchema,
   UpsertTagSchema,
 } from "./schemas.ts";
+import type {
+  AiJobEventSchema,
+  AiJobIdSchema,
+  AiJobSchema,
+  AiJobStatusSchema,
+  CreateAiJobSchema,
+  GenerateCardsCommandSchema,
+  GeneratedCardSchema,
+  LlmProviderSchema,
+} from "./messages.ts";
 
 export type BoardId = z.infer<typeof BoardIdSchema>;
 export type ColumnId = z.infer<typeof ColumnIdSchema>;
@@ -36,3 +46,12 @@ export type SyncState =
   | { status: "synced" }
   | { status: "pending"; since: string }
   | { status: "error"; message: string };
+
+export type AiJobId = z.infer<typeof AiJobIdSchema>;
+export type AiJobStatus = z.infer<typeof AiJobStatusSchema>;
+export type AiJob = z.infer<typeof AiJobSchema>;
+export type CreateAiJobInput = z.infer<typeof CreateAiJobSchema>;
+export type GeneratedCard = z.infer<typeof GeneratedCardSchema>;
+export type GenerateCardsCommand = z.infer<typeof GenerateCardsCommandSchema>;
+export type AiJobEvent = z.infer<typeof AiJobEventSchema>;
+export type LlmProvider = z.infer<typeof LlmProviderSchema>;

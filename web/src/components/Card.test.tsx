@@ -1,4 +1,4 @@
-import { BoardSnapshotSchema } from "@taskflow/shared";
+import { BoardSnapshotSchema, ColumnSchema } from "@taskflow/shared";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "../store/boardStore.ts";
@@ -13,7 +13,7 @@ const snapshot = BoardSnapshotSchema.pick({ columns: true, cards: true, tags: tr
   cards: [{
     id: "00000000-0000-4000-8000-000000000003",
     columnId: "00000000-0000-4000-8000-000000000001",
-    title: "Estudar React", description: "Revisar os hooks", tagIds: [], position: 1000,
+    title: "Estudar React", description: "Revisar os hooks", observation: "Notas completas", tagIds: [], position: 1000,
     createdAt: "2026-01-02T12:00:00Z", updatedAt: "2026-02-03T15:30:00Z",
   }],
 });
@@ -54,11 +54,31 @@ describe("cartão", () => {
     expect(screen.getByRole("dialog")).toHaveAttribute("open");
   });
 
-  it("mostra o ícone apenas quando existe descrição", () => {
+  it("mostra a descrição sob o título e o ícone apenas quando existe observação", () => {
     render(<Card id={card.id} />);
-    expect(screen.getByRole("img", { name: "Tem descrição" })).toBeInTheDocument();
-    act(() => useBoardStore.getState().updateCard(card.id, { description: null }));
-    expect(screen.queryByRole("img", { name: "Tem descrição" })).not.toBeInTheDocument();
+    expect(screen.getByText("Revisar os hooks")).toBeInTheDocument();
+    expect(screen.queryByText("Notas completas")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Tem observação" })).toBeInTheDocument();
+    act(() => useBoardStore.getState().updateCard(card.id, { observation: null }));
+    expect(screen.queryByRole("img", { name: "Tem observação" })).not.toBeInTheDocument();
+    expect(screen.getByText("Revisar os hooks")).toBeInTheDocument();
+  });
+
+  it("mostra a data de entrega: normal no prazo, vermelha quando atrasada", () => {
+    // Segunda coluna: na última coluna (concluídos) o cartão nunca fica atrasado.
+    const done = ColumnSchema.parse({ id: "00000000-0000-4000-8000-000000000009", title: "Feito", position: 2000 });
+    useBoardStore.getState().hydrate({ ...snapshot, columns: [...snapshot.columns, done], cards: [{ ...card, dueDate: "2999-12-31" }] });
+    render(<Card id={card.id} />);
+    expect(screen.getByLabelText("Entrega em 31/12/2999")).not.toHaveClass("bg-red-600");
+
+    act(() => useBoardStore.getState().updateCard(card.id, { dueDate: "2020-01-15" }));
+    expect(screen.getByLabelText("Entrega atrasada: 15/01/2020")).toHaveClass("bg-red-600");
+
+    act(() => useBoardStore.getState().moveCard(card.id, useBoardStore.getState().columnOrder[1]!, 0));
+    expect(screen.getByLabelText("Entrega em 15/01/2020")).not.toHaveClass("bg-red-600");
+
+    act(() => useBoardStore.getState().updateCard(card.id, { dueDate: null }));
+    expect(screen.queryByLabelText(/Entrega/)).not.toBeInTheDocument();
   });
 
   it("exclui o cartão", () => {

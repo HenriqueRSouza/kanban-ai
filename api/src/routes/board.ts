@@ -11,9 +11,10 @@ type ColumnRow = SnapshotInput["columns"][number];
 type TagRow = SnapshotInput["tags"][number];
 type CardRow = Omit<
   SnapshotInput["cards"][number],
-  "columnId" | "tagIds" | "createdAt" | "updatedAt"
+  "columnId" | "tagIds" | "dueDate" | "createdAt" | "updatedAt"
 > & {
   column_id: string;
+  due_date: string | null;
   tag_ids: string[];
   created_at: Date;
   updated_at: Date;
@@ -40,7 +41,8 @@ boardRouter.get("/board", async (_req, res) => {
       [BOARD_ID],
     ),
     query<CardRow>(
-      `select c.id, c.column_id, c.title, c.description, c.position,
+      `select c.id, c.column_id, c.title, c.description, c.observation,
+              c.due_date::text as due_date, c.position,
               c.created_at, c.updated_at,
               coalesce(array_agg(ct.tag_id order by ct.tag_id)
                 filter (where ct.tag_id is not null), '{}') as tag_ids
@@ -66,6 +68,8 @@ boardRouter.get("/board", async (_req, res) => {
       columnId: card.column_id,
       title: card.title,
       description: card.description,
+      observation: card.observation,
+      dueDate: card.due_date,
       position: card.position,
       tagIds: card.tag_ids,
       createdAt: card.created_at.toISOString(),

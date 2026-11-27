@@ -46,8 +46,8 @@ describe('HttpBoardRepository', () => {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       // sem o id (vai na URL); com as datas, para o histórico no banco
       body: JSON.stringify({
-        columnId, title: card.title, description: card.description,
-        tagIds: card.tagIds, position: card.position, createdAt: card.createdAt, updatedAt: card.updatedAt,
+        columnId, title: card.title, description: card.description, observation: card.observation,
+        tagIds: card.tagIds, dueDate: card.dueDate, position: card.position, createdAt: card.createdAt, updatedAt: card.updatedAt,
       }),
     });
   });

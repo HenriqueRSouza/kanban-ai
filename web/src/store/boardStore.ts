@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { BoardSnapshotSchema, CardSchema, ColumnSchema, TagSchema } from "@taskflow/shared";
+import { z } from "zod";
 import type { Card, CardId, Column, ColumnId, Tag, TagColor, TagId } from "@taskflow/shared";
 import { newCardId, newColumnId, newTagId } from "../lib/ids.ts";
 import { needsRebalance, positionAtIndex, rebalancedPositions } from "../lib/position.ts";
@@ -25,6 +26,11 @@ export interface BoardData {
 
 /** Formato "plano" (listas), igual ao da API — é o que vai para o localStorage. */
 const StoredBoardSchema = BoardSnapshotSchema.pick({ columns: true, cards: true, tags: true });
+const LegacyBoardSchema = StoredBoardSchema.extend({
+  cards: z.array(CardSchema.omit({ observation: true, description: true }).extend({
+    description: z.string().max(5000).nullable(),
+  })),
+});
 type StoredBoard = { columns: Column[]; cards: Card[]; tags: Tag[] };
 
 export interface BoardActions {
@@ -37,7 +43,7 @@ export interface BoardActions {
   moveColumn: (id: ColumnId, toIndex: number) => void;
 
   addCard: (columnId: ColumnId, title: string) => CardId | null;
-  updateCard: (id: CardId, changes: Partial<Pick<Card, "title" | "description">>) => void;
+  updateCard: (id: CardId, changes: Partial<Pick<Card, "title" | "description" | "observation" | "dueDate">>) => void;
   removeCard: (id: CardId) => void;
   /** Move o cartão para `toColumnId` (pode ser a mesma coluna) no índice `toIndex`. */
   moveCard: (id: CardId, toColumnId: ColumnId, toIndex: number) => void;
@@ -188,7 +194,9 @@ export const useBoardStore = create<BoardStore>()(
           columnId,
           title,
           description: null,
+          observation: null,
           tagIds: [],
+          dueDate: null,
           position: positionAtIndex(
             ids.map((cardId) => cards[cardId]?.position ?? 0),
             ids.length,
@@ -212,7 +220,17 @@ export const useBoardStore = create<BoardStore>()(
           if (!title) return;
           next.title = title;
         }
-        if (changes.description !== undefined) next.description = changes.description?.trim() || null;
+        if (changes.description !== undefined) {
+          const description = CardSchema.shape.description.safeParse(changes.description?.trim() || null);
+          if (!description.success) return;
+          next.description = description.data;
+        }
+        if (changes.observation !== undefined) next.observation = changes.observation?.trim() || null;
+        if (changes.dueDate !== undefined) {
+          const dueDate = CardSchema.shape.dueDate.safeParse(changes.dueDate || null);
+          if (!dueDate.success) return;
+          next.dueDate = dueDate.data;
+        }
         set((s) => ({ cards: { ...s.cards, [id]: next } }));
       },
 
@@ -277,8 +295,17 @@ export const useBoardStore = create<BoardStore>()(
     }),
     {
       name: "taskflow-board",
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persisted, version) => {
+        if (version !== 1) return persisted;
+        const legacy = LegacyBoardSchema.safeParse(persisted);
+        if (!legacy.success) return persisted;
+        return {
+          ...legacy.data,
+          cards: legacy.data.cards.map((card) => ({ ...card, description: null, observation: card.description })),
+        };
+      },
       // Salva só os dados, em formato plano (as ações não são serializáveis).
       partialize: (state) => denormalize(state),
       // Dado vindo do localStorage é "externo": valida antes de usar. Se estiver
@@ -301,5 +328,8 @@ export const useCardIds = (columnId: ColumnId) => useBoardStore((s) => s.cardOrd
 export const useCard = (id: CardId) => useBoardStore((s) => s.cards[id]);
 export const useTag = (id: TagId) => useBoardStore((s) => s.tags[id]);
 export const useTags = () => useBoardStore((s) => s.tags);
+/** Cartões na última coluna são tratados como concluídos (não ficam "atrasados"). */
+export const useIsInLastColumn = (columnId: ColumnId | undefined) =>
+  useBoardStore((s) => columnId !== undefined && s.columnOrder.at(-1) === columnId);
 
 const EMPTY_IDS: CardId[] = [];

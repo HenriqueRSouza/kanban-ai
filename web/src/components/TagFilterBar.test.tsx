@@ -52,10 +52,19 @@ afterEach(() => {
 });
 
 describe("barra de filtro no quadro", () => {
-  it("não renderiza nada quando não há etiquetas", () => {
+  it("sem etiquetas mostra só o criador de etiquetas, sem o grupo de filtro", () => {
     useBoardStore.getState().hydrate({ ...snapshot, tags: [] });
-    const { container } = render(<TagFilterBar />);
-    expect(container).toBeEmptyDOMElement();
+    render(<TagFilterBar />);
+    expect(screen.queryByRole("group", { name: "Filtrar cartões por etiqueta" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Etiqueta" })).toBeInTheDocument();
+  });
+
+  it("a etiqueta criada na linha dos filtros já aparece como filtro", () => {
+    render(<TagFilterBar />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Etiqueta" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Nome da nova etiqueta" }), { target: { value: "Nova" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar" }));
+    expect(filterButton("Nova")).toHaveAttribute("aria-pressed", "false");
   });
 
   it("filtra um de três cartões, informa o contador e limpar volta a mostrar tudo", () => {

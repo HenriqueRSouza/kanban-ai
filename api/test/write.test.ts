@@ -188,10 +188,30 @@ describe.skipIf(!process.env.DATABASE_URL)("Escrita com PostgreSQL real", () => 
     const first = await createColumn();
     const second = await createColumn();
     const card = await createCard(first.id);
-    const body = { columnId: second.id, title: "Cartão movido", description: "Descrição alterada", position: 5, tagIds: [] };
+    const body = { columnId: second.id, title: "Cartão movido", description: "Descrição alterada", observation: "Observação longa ".repeat(400), position: 5, tagIds: [] };
     const response = await request(app).put(`/api/cards/${card.id}`).send(body).expect(200);
     expect(CardSchema.parse(response.body)).toMatchObject({ id: card.id, ...body });
     expect((await getBoard()).cards.find((item) => item.id === card.id)).toMatchObject(body);
+  });
+
+  it("PUT cartão rejeita descrição acima do limite", async () => {
+    const column = await createColumn();
+    await request(app).put(`/api/cards/${randomUUID()}`)
+      .send({ columnId: column.id, title: "Cartão", description: "a".repeat(161), observation: "b".repeat(6000), position: 1, tagIds: [] })
+      .expect(400);
+  });
+
+  it("PUT cartão grava, devolve e limpa a data de entrega", async () => {
+    const column = await createColumn();
+    const card = await createCard(column.id);
+    expect(card.dueDate).toBeNull();
+    const body = { columnId: column.id, title: card.title, description: null, position: 1, tagIds: [] };
+    const saved = await request(app).put(`/api/cards/${card.id}`).send({ ...body, dueDate: "2026-12-25" }).expect(200);
+    expect(CardSchema.parse(saved.body).dueDate).toBe("2026-12-25");
+    expect((await getBoard()).cards.find((item) => item.id === card.id)?.dueDate).toBe("2026-12-25");
+    await request(app).put(`/api/cards/${card.id}`).send({ ...body, dueDate: "25/12/2026" }).expect(400);
+    const cleared = await request(app).put(`/api/cards/${card.id}`).send({ ...body, dueDate: null }).expect(200);
+    expect(CardSchema.parse(cleared.body).dueDate).toBeNull();
   });
 
   it("PUT cartão com coluna inexistente retorna 409 sem criar o cartão", async () => {

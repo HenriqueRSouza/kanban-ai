@@ -19,7 +19,7 @@ export function Board() {
   const closeCard = useCardDetailsStore((s) => s.closeCard);
 
   return (
-    <section aria-label="Quadro de tarefas" className="mx-auto max-w-[1440px] px-4 pb-8 sm:px-8">
+    <section aria-label="Quadro de tarefas" className="px-4 pb-8 sm:px-8">
       <TagFilterBar />
       {/* DndContext: "área" onde arrastar funciona; recebe sensores e os handlers. */}
       <DndContext {...contextProps}>

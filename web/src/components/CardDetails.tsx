@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import type { MouseEvent } from "react";
-import { TITLE_LIMITS } from "@taskflow/shared";
+import { DESCRIPTION_LIMIT, TITLE_LIMITS } from "@taskflow/shared";
 import type { CardId } from "@taskflow/shared";
-import { useBoardStore, useCard } from "../store/boardStore.ts";
+import { isOverdue } from "../lib/dueDate.ts";
+import { useBoardStore, useCard, useIsInLastColumn } from "../store/boardStore.ts";
 import { CardHistory } from "./CardHistory.tsx";
 import { TagPicker } from "./TagPicker.tsx";
 
 const dateFormat = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
 /**
- * Painel de detalhes do cartão: título, descrição, etiquetas e datas.
+ * Painel de detalhes do cartão: título, descrição curta, observação, etiquetas e datas.
  *
  * Usa o <dialog> nativo do HTML aberto com showModal(), que já entrega:
  * foco preso dentro do painel, Esc para fechar e o resto da página inerte.
@@ -19,26 +20,33 @@ export function CardDetails({ id, onClose }: { id: CardId; onClose: () => void }
   const columnTitle = useBoardStore((s) => (card ? s.columns[card.columnId]?.title : undefined));
   const updateCard = useBoardStore((s) => s.updateCard);
   const removeCard = useBoardStore((s) => s.removeCard);
+  const isDone = useIsInLastColumn(card?.columnId);
 
   // Rascunhos locais: digitar não altera o store (nem dispara envio ao servidor)
   // a cada tecla; só ao sair do campo ou fechar o painel.
   const [title, setTitle] = useState(card?.title ?? "");
   const [description, setDescription] = useState(card?.description ?? "");
+  const [observation, setObservation] = useState(card?.observation ?? "");
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLInputElement>(null);
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const descriptionRef = useRef<HTMLInputElement>(null);
+  const observationRef = useRef<HTMLTextAreaElement>(null);
 
   // O cartão mudou por fora (outra aba, servidor) enquanto o painel está aberto:
   // atualiza o rascunho — a não ser que o usuário esteja digitando naquele campo.
   const storedTitle = card?.title;
   const storedDescription = card?.description;
+  const storedObservation = card?.observation;
   useEffect(() => {
     if (storedTitle !== undefined && document.activeElement !== titleRef.current) setTitle(storedTitle);
   }, [storedTitle]);
   useEffect(() => {
     if (document.activeElement !== descriptionRef.current) setDescription(storedDescription ?? "");
   }, [storedDescription]);
+  useEffect(() => {
+    if (document.activeElement !== observationRef.current) setObservation(storedObservation ?? "");
+  }, [storedObservation]);
 
   // Abre o <dialog> como modal assim que ele existe no DOM; fecha ao desmontar.
   useEffect(() => {
@@ -53,12 +61,14 @@ export function CardDetails({ id, onClose }: { id: CardId; onClose: () => void }
   }, [card, onClose]);
 
   if (!card) return null;
+  const overdue = card.dueDate !== null && !isDone && isOverdue(card.dueDate);
 
   function save() {
     if (!card) return;
-    const changes: { title?: string; description?: string | null } = {};
+    const changes: { title?: string; description?: string | null; observation?: string | null } = {};
     if (title.trim() && title.trim() !== card.title) changes.title = title;
     if ((description.trim() || null) !== card.description) changes.description = description;
+    if ((observation.trim() || null) !== card.observation) changes.observation = observation;
     if (Object.keys(changes).length > 0) updateCard(id, changes);
   }
 
@@ -121,17 +131,66 @@ export function CardDetails({ id, onClose }: { id: CardId; onClose: () => void }
           <label htmlFor="card-description" className="text-sm font-semibold">
             Descrição
           </label>
-          <textarea
+          <input
             ref={descriptionRef}
             id="card-description"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             onBlur={save}
+            maxLength={DESCRIPTION_LIMIT}
+            placeholder="Resumo breve da tarefa…"
+            className="w-full rounded-xl border border-neutral-300 bg-tile px-3 py-2 text-sm focus:border-ink focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+          />
+          <p className="text-right text-xs text-neutral-500">{description.length}/{DESCRIPTION_LIMIT} caracteres</p>
+        </section>
+
+        <section className="space-y-2">
+          <label htmlFor="card-observation" className="text-sm font-semibold">
+            Observação
+          </label>
+          <textarea
+            ref={observationRef}
+            id="card-observation"
+            value={observation}
+            onChange={(event) => setObservation(event.target.value)}
+            onBlur={save}
             rows={5}
-            maxLength={5000}
-            placeholder="Adicione mais detalhes sobre esta tarefa…"
+            placeholder="Adicione detalhes e anotações sobre esta tarefa…"
             className="w-full resize-y rounded-xl border border-neutral-300 bg-tile px-3 py-2 text-sm leading-relaxed focus:border-ink focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500"
           />
+        </section>
+
+        <section className="space-y-2">
+          <label htmlFor="card-due-date" className="text-sm font-semibold">
+            Data de entrega
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Salva na hora: o seletor de data não tem "digitação" a cada tecla. */}
+            <input
+              id="card-due-date"
+              type="date"
+              value={card.dueDate ?? ""}
+              onChange={(event) => updateCard(id, { dueDate: event.target.value || null })}
+              aria-describedby={overdue ? "card-due-date-status" : undefined}
+              className={`rounded-xl border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 ${
+                overdue ? "border-red-600 bg-red-50 text-red-700" : "border-neutral-300 bg-tile focus:border-ink focus:bg-white"
+              }`}
+            />
+            {overdue && (
+              <span id="card-due-date-status" className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">
+                Atrasado
+              </span>
+            )}
+            {card.dueDate && (
+              <button
+                type="button"
+                onClick={() => updateCard(id, { dueDate: null })}
+                className="rounded-full px-3 py-1 text-sm text-neutral-500 transition hover:bg-band hover:text-ink"
+              >
+                Remover data
+              </button>
+            )}
+          </div>
         </section>
 
         <section className="space-y-2">

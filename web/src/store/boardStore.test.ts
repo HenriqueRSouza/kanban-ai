@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { BoardSnapshotSchema, CardIdSchema, ColumnIdSchema, TagIdSchema } from '@taskflow/shared';
+import { BoardSnapshotSchema, CardIdSchema, ColumnIdSchema, DESCRIPTION_LIMIT, TagIdSchema } from '@taskflow/shared';
 import type { CardId, ColumnId } from '@taskflow/shared';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { seedBoard } from '../lib/devSeed';
@@ -221,6 +221,26 @@ describe('remoção e etiquetas', () => {
 });
 
 describe('referências e persistência', () => {
+  it('rejeita descrição acima do limite e aceita observação sem limite', () => {
+    const id = addCard(columnAt(0), 'A');
+    const before = useBoardStore.getState();
+    before.updateCard(id, { description: 'a'.repeat(DESCRIPTION_LIMIT + 1) });
+    expect(useBoardStore.getState()).toBe(before);
+    before.updateCard(id, { description: 'Resumo', observation: 'b'.repeat(6000) });
+    expect(useBoardStore.getState().cards[id]).toMatchObject({ description: 'Resumo', observation: 'b'.repeat(6000) });
+  });
+
+  it('migra descrições antigas do localStorage para observações', async () => {
+    const id = addCard(columnAt(0), 'A');
+    const legacy = denormalize(useBoardStore.getState());
+    localStorage.setItem('taskflow-board', JSON.stringify({
+      state: { ...legacy, cards: legacy.cards.map((card) => ({ ...card, description: 'Nota antiga'.repeat(200), observation: undefined })) },
+      version: 1,
+    }));
+    await useBoardStore.persist.rehydrate();
+    expect(useBoardStore.getState().cards[id]).toMatchObject({ description: null, observation: 'Nota antiga'.repeat(200) });
+  });
+
   it('atualiza A preservando o mesmo objeto do cartão B', () => {
     const first = addCard(columnAt(0), 'A');
     const second = addCard(columnAt(0), 'B');

@@ -44,25 +44,6 @@ describe("seletor de etiquetas", () => {
     expect(useBoardStore.getState().cards[card.id]?.tagIds).toEqual([]);
   });
 
-  it("cria etiqueta vermelha já marcada e limpa o campo", () => {
-    render(<TagPicker cardId={card.id} />);
-    const input = screen.getByRole("textbox", { name: "Nome da nova etiqueta" });
-    const submit = screen.getByRole("button", { name: "Criar" });
-    expect(submit).toBeDisabled();
-    fireEvent.change(input, { target: { value: "   " } });
-    expect(submit).toBeDisabled();
-    fireEvent.change(input, { target: { value: "Revisão" } });
-    fireEvent.click(screen.getByRole("radio", { name: "Vermelho" }));
-    expect(screen.getByRole("radio", { name: "Vermelho" })).toBeChecked();
-    fireEvent.click(submit);
-    const tag = Object.values(useBoardStore.getState().tags).find((item) => item.name === "Revisão");
-    expect(tag).toMatchObject({ name: "Revisão", color: "red" });
-    expect(useBoardStore.getState().cards[card.id]?.tagIds).toEqual([tag?.id]);
-    expect(screen.getByRole("checkbox", { name: "Revisão" })).toBeChecked();
-    expect(input).toHaveValue("");
-    expect(submit).toBeDisabled();
-  });
-
   it.each([true, false])("exclui etiqueta do quadro e do cartão apenas com confirmação %s", (accepted) => {
     const tag = snapshot.tags[0]!;
     useBoardStore.getState().hydrate({ ...snapshot, cards: [{ ...card, tagIds: [tag.id] }] });

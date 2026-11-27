@@ -17,6 +17,7 @@ export const TAG_COLORS = ["yellow", "black", "gray", "green", "red", "blue"] as
 export const TagColorSchema = z.enum(TAG_COLORS);
 
 export const TITLE_LIMITS = { column: 80, card: 200, tag: 30 } as const;
+export const DESCRIPTION_LIMIT = 160;
 
 const title = (max: number) => z.string().trim().min(1, "Título obrigatório").max(max);
 
@@ -36,8 +37,12 @@ export const CardSchema = z.object({
   id: CardIdSchema,
   columnId: ColumnIdSchema,
   title: title(TITLE_LIMITS.card),
-  description: z.string().max(5000).nullable(),
+  description: z.string().max(DESCRIPTION_LIMIT).nullable(),
+  observation: z.string().nullable().default(null),
   tagIds: z.array(TagIdSchema),
+  // Data de entrega (AAAA-MM-DD), sem horário nem fuso: "entregar até o dia X".
+  // O default aceita dados salvos antes de o campo existir (localStorage, clientes antigos).
+  dueDate: z.iso.date().nullable().default(null),
   position: z.number().finite(),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),

@@ -45,16 +45,18 @@ cardsRouter.put("/:id", async (req, res) => {
   try {
     await client.query("begin");
     const result = await client.query<CardRow>(
-      `insert into cards (id, column_id, title, description, position, created_at, updated_at)
-       values ($1, $2, $3, $4, $5,
-         least(coalesce($6::timestamptz, now()), now()),
-         least(coalesce($7::timestamptz, now()), now()))
+      `insert into cards (id, column_id, title, description, observation, due_date, position, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, $7,
+         least(coalesce($8::timestamptz, now()), now()),
+         least(coalesce($9::timestamptz, now()), now()))
        on conflict (id) do update set column_id = excluded.column_id,
-         title = excluded.title, description = excluded.description,
+         title = excluded.title, description = excluded.description, observation = excluded.observation,
+         due_date = excluded.due_date,
          position = excluded.position, updated_at = excluded.updated_at
-       returning id, column_id as "columnId", title, description, position,
+       returning id, column_id as "columnId", title, description, observation,
+         due_date::text as "dueDate", position,
          created_at as "createdAt", updated_at as "updatedAt"`,
-      [id, body.columnId, body.title, body.description, body.position,
+      [id, body.columnId, body.title, body.description, body.observation, body.dueDate, body.position,
         body.createdAt ?? null, body.updatedAt ?? null],
     );
     await client.query("delete from card_tags where card_id = $1", [id]);

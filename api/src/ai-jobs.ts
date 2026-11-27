@@ -89,6 +89,21 @@ export async function getAiJob(id: string): Promise<AiJob | null> {
   return row ? toAiJob(row) : null;
 }
 
+/**
+ * Marca como falho um job cujo comando foi parar na DLQ sem resultado: o RabbitMQ
+ * desiste sozinho quando o worker cai em todas as entregas (x-delivery-limit), e
+ * nesse caso nenhum evento cards.generation_failed é publicado. Jobs já terminados
+ * (ex.: o worker publicou a falha e depois rejeitou o comando) não mudam.
+ */
+export async function failDeadLetteredJob(jobId: string, reason: string): Promise<boolean> {
+  const result = await query(
+    `update ai_jobs set status = 'failed', error = $2, completed_at = now(), updated_at = now()
+     where id = $1 and status in ('pending_publish', 'queued', 'processing')`,
+    [jobId, reason],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
 /** Monta o comando do RabbitMQ a partir do job salvo (formato validado pelo contrato). */
 function toCommand(row: AiJobRow, targetColumnId: string): GenerateCardsCommand {
   return GenerateCardsCommandSchema.parse({

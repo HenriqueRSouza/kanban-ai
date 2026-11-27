@@ -1,6 +1,6 @@
-import { AI_MESSAGING, AiJobEventSchema } from "@taskflow/shared";
+import { AI_MESSAGING, AiJobEventSchema, GenerateCardsCommandSchema } from "@taskflow/shared";
 import type { Channel, ChannelModel, ConsumeMessage } from "amqplib";
-import { applyAiJobEvent, type ApplyOutcome } from "../ai-jobs.ts";
+import { applyAiJobEvent, failDeadLetteredJob, type ApplyOutcome } from "../ai-jobs.ts";
 import { errorMessage, log } from "../log.ts";
 
 const PREFETCH = 10;
@@ -69,6 +69,55 @@ export async function startResultsConsumer(model: ChannelModel): Promise<void> {
       });
       if (decision.action === "reject") settle(channel, message, decision);
       else setTimeout(() => settle(channel, message, decision), RETRY_DELAY_MS);
+    });
+  }, { noAck: false });
+}
+
+export const DEAD_LETTER_REASON =
+  "O pedido não pôde ser processado: o Serviço B falhou em todas as tentativas. Tente de novo.";
+
+export type DeadLetterDecision =
+  | { action: "ack"; jobId: string | null; failed: boolean }
+  | { action: "retry"; reason: string };
+
+/**
+ * Decide o destino de um comando que caiu na ai.generate.dlq. Comando ilegível
+ * é só descartado (fica no log); comando válido marca o job como falho, para o
+ * usuário não ver "Processando" para sempre.
+ */
+export async function handleDeadLetteredCommand(content: Buffer): Promise<DeadLetterDecision> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    return { action: "ack", jobId: null, failed: false };
+  }
+  const command = GenerateCardsCommandSchema.safeParse(parsed);
+  if (!command.success) return { action: "ack", jobId: null, failed: false };
+  try {
+    const failed = await failDeadLetteredJob(command.data.jobId, DEAD_LETTER_REASON);
+    log("job.dead_lettered", { correlationId: command.data.correlationId, jobId: command.data.jobId, failed });
+    return { action: "ack", jobId: command.data.jobId, failed };
+  } catch (error: unknown) {
+    return { action: "retry", reason: errorMessage(error) };
+  }
+}
+
+/** Consome a ai.generate.dlq. Recriado pelo broker a cada reconexão. */
+export async function startDeadLetterConsumer(model: ChannelModel): Promise<void> {
+  const channel = await model.createChannel();
+  channel.on("error", (error: Error) => log("dlq.channel_error", { error: error.message }));
+  await channel.prefetch(PREFETCH);
+  await channel.consume(AI_MESSAGING.queues.generateDeadLetter, (message) => {
+    if (!message) return;
+    void handleDeadLetteredCommand(message.content).then((decision) => {
+      try {
+        if (decision.action === "ack") channel.ack(message);
+        // A DLQ não tem DLQ: falha no banco volta para a fila depois de uma pausa.
+        else setTimeout(() => channel.nack(message, false, true), RETRY_DELAY_MS);
+      } catch (error: unknown) {
+        log("dlq.settle_failed", { error: errorMessage(error) });
+      }
     });
   }, { noAck: false });
 }

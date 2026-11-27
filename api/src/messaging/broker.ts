@@ -15,6 +15,7 @@ export interface Broker {
 }
 
 const CONFIRM_TIMEOUT_MS = 10_000;
+const CONNECT_TIMEOUT_MS = 10_000;
 
 /**
  * Conecta ao RabbitMQ com reconexão automática. A API sobe mesmo com o broker
@@ -29,6 +30,10 @@ export async function connectBroker(
   let publisher: Promise<ConfirmChannel> | null = null;
 
   const connection = await connect(url, {
+    // Sem timeout, uma reconexão que pega o broker ainda desligando (TCP aceito,
+    // handshake AMQP sem resposta) fica pendurada para sempre e a API nunca
+    // mais publica. Com ele, a tentativa falha e a próxima é agendada.
+    timeout: CONNECT_TIMEOUT_MS,
     recovery: {
       waitForConnect: false,
       maxDelay: 10_000,

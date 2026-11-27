@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { AI_MESSAGING, assertAiTopology, type AiJobEvent } from "@taskflow/shared";
 import { connect, type ChannelModel, type ConfirmChannel, type ConsumeMessage } from "amqplib";
 import { ConfigError, loadConfig } from "./config.ts";
-import { attemptOf, processCommand, type Decision } from "./consumer.ts";
+import { ATTEMPT_HEADER, attemptOf, processCommand, type Decision } from "./consumer.ts";
 import { createLlmClient } from "./llm/client.ts";
 import { errorMessage, log } from "./log.ts";
 
@@ -37,6 +37,28 @@ function publishEvent(target: ConfirmChannel, event: AiJobEvent): Promise<void> 
   });
 }
 
+/**
+ * Nova tentativa: publica uma cópia no fim da fila com o número da próxima
+ * tentativa e, só depois da confirmação do broker, dá ack na original. Se o
+ * worker cair entre os dois passos, a original volta (sem ack) e o job pode ser
+ * processado de novo; a API aplica o resultado de forma idempotente pelo jobId.
+ */
+function republishForRetry(target: ConfirmChannel, message: ConsumeMessage, nextAttempt: number): Promise<void> {
+  const { headers, ...properties } = message.properties;
+  const { "x-delivery-count": _ignored, ...rest } = headers ?? {};
+  return new Promise((resolve, reject) => {
+    target.sendToQueue(AI_MESSAGING.queues.generate, message.content, {
+      persistent: true,
+      contentType: properties.contentType,
+      messageId: properties.messageId,
+      correlationId: properties.correlationId,
+      type: properties.type,
+      timestamp: properties.timestamp,
+      headers: { ...rest, [ATTEMPT_HEADER]: nextAttempt },
+    }, (error: unknown) => (error ? reject(new Error(errorMessage(error))) : resolve()));
+  });
+}
+
 function settle(target: ConfirmChannel, message: ConsumeMessage, decision: Decision): void {
   // Se o canal caiu, o RabbitMQ devolve a mensagem sem ack à fila sozinho.
   try {
@@ -48,7 +70,8 @@ function settle(target: ConfirmChannel, message: ConsumeMessage, decision: Decis
 }
 
 async function handle(target: ConfirmChannel, message: ConsumeMessage): Promise<void> {
-  const decision = await processCommand(message.content, attemptOf(message.properties.headers), {
+  const attempt = attemptOf(message.properties.headers);
+  const decision = await processCommand(message.content, attempt, {
     llm,
     publishEvent: (event) => publishEvent(target, event),
     worker: workerName,
@@ -57,11 +80,24 @@ async function handle(target: ConfirmChannel, message: ConsumeMessage): Promise<
   });
   if (decision.action !== "ack") log(`msg.${decision.action}`, { reason: decision.reason });
   // Espera antes de devolver, para um modelo fora do ar não virar um laço de reentregas.
-  if (decision.action === "retry") await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+  if (decision.action === "retry") {
+    await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    try {
+      await republishForRetry(target, message, attempt + 1);
+      target.ack(message);
+      return;
+    } catch (error: unknown) {
+      // Sem a cópia confirmada, devolve a original à fila (comportamento anterior).
+      log("msg.republish_failed", { error: errorMessage(error) });
+    }
+  }
   settle(target, message, decision);
 }
 
 const connection = await connect(config.rabbitmqUrl, {
+  // Sem timeout, uma reconexão que pega o broker ainda desligando fica pendurada
+  // para sempre e o worker para de consumir (mesmo problema da API).
+  timeout: 10_000,
   recovery: {
     waitForConnect: false,
     maxDelay: 10_000,

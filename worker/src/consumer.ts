@@ -101,8 +101,23 @@ export async function processCommand(content: Buffer, attempt: number, deps: Pro
   }
 }
 
-/** Número da tentativa atual, a partir do contador das filas quorum. */
+/**
+ * Cabeçalho com o número da tentativa, gravado pelo próprio worker ao republicar
+ * a mensagem para uma nova tentativa. É necessário porque, no RabbitMQ 4, o
+ * nack com requeue não incrementa o x-delivery-count das filas quorum: sem ele,
+ * toda tentativa seria a "primeira" e um job com timeout nunca desistiria.
+ */
+export const ATTEMPT_HEADER = "x-taskflow-attempt";
+
+/**
+ * Número da tentativa atual: a do cabeçalho do worker (padrão 1) somada às
+ * reentregas desta cópia pelo broker (x-delivery-count; ex.: o worker caiu
+ * no meio do processamento e a mensagem sem ack voltou para a fila).
+ */
 export function attemptOf(headers: Record<string, unknown> | undefined): number {
+  const own = headers?.[ATTEMPT_HEADER];
   const count = headers?.["x-delivery-count"];
-  return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count + 1 : 1;
+  const base = typeof own === "number" && Number.isInteger(own) && own >= 1 ? own : 1;
+  const redeliveries = typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : 0;
+  return base + redeliveries;
 }

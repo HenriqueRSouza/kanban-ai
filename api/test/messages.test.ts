@@ -8,7 +8,7 @@ import {
   type TopologyChannel,
 } from "@taskflow/shared";
 import { describe, expect, it } from "vitest";
-import { handleResultMessage } from "../src/messaging/results.ts";
+import { handleDeadLetteredCommand, handleResultMessage } from "../src/messaging/results.ts";
 import { uuidV5 } from "../src/uuid.ts";
 
 const envelope = () => ({
@@ -107,6 +107,14 @@ describe("Resultados inválidos", () => {
     expect(await handleResultMessage(Buffer.from("{nao é json"))).toEqual({ action: "reject", reason: "JSON inválido" });
     const outOfContract = await handleResultMessage(Buffer.from(JSON.stringify({ type: "cards.generated" })));
     expect(outOfContract.action).toBe("reject");
+  });
+});
+
+describe("Comandos na DLQ ilegíveis", () => {
+  it("são descartados sem tocar no banco", async () => {
+    expect(await handleDeadLetteredCommand(Buffer.from("{nao é json"))).toEqual({ action: "ack", jobId: null, failed: false });
+    expect(await handleDeadLetteredCommand(Buffer.from(JSON.stringify({ type: "cards.generate" }))))
+      .toEqual({ action: "ack", jobId: null, failed: false });
   });
 });
 

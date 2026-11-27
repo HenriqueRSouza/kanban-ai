@@ -5,7 +5,7 @@ import { pool } from "./db.ts";
 import { errorMessage, log } from "./log.ts";
 import { connectBroker, type Broker } from "./messaging/broker.ts";
 import { createOutbox } from "./messaging/outbox.ts";
-import { startResultsConsumer } from "./messaging/results.ts";
+import { startDeadLetterConsumer, startResultsConsumer } from "./messaging/results.ts";
 
 const port = Number(process.env.PORT ?? 3000);
 const rabbitmqUrl = process.env.RABBITMQ_URL;
@@ -25,7 +25,10 @@ const server = createApp({ onAiJobCreated: () => void outbox.trigger() }).listen
 });
 
 if (rabbitmqUrl) {
-  broker = await connectBroker(rabbitmqUrl, startResultsConsumer);
+  broker = await connectBroker(rabbitmqUrl, async (model) => {
+    await startResultsConsumer(model);
+    await startDeadLetterConsumer(model);
+  });
   outbox.start();
 } else {
   log("broker.disabled", { reason: "RABBITMQ_URL não definida; jobs do Agente de IA ficam pendentes" });

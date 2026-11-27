@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { AiJobEventSchema, type AiJobEvent, type GeneratedCard } from "@taskflow/shared";
 import { describe, expect, it } from "vitest";
-import { attemptOf, MAX_ATTEMPTS, processCommand, type ProcessDeps } from "../src/consumer.ts";
+import { ATTEMPT_HEADER, attemptOf, MAX_ATTEMPTS, processCommand, type ProcessDeps } from "../src/consumer.ts";
 import { LlmError } from "../src/llm/client.ts";
 
 const command = {
@@ -96,5 +96,13 @@ describe("Número da tentativa", () => {
     expect(attemptOf({})).toBe(1);
     expect(attemptOf({ "x-delivery-count": 2 })).toBe(3);
     expect(attemptOf({ "x-delivery-count": "2" })).toBe(1);
+  });
+
+  it("soma o cabeçalho do worker às reentregas do broker", () => {
+    expect(attemptOf({ [ATTEMPT_HEADER]: 2 })).toBe(2);
+    expect(attemptOf({ [ATTEMPT_HEADER]: 3, "x-delivery-count": 0 })).toBe(3);
+    expect(attemptOf({ [ATTEMPT_HEADER]: 2, "x-delivery-count": 1 })).toBe(3);
+    expect(attemptOf({ [ATTEMPT_HEADER]: 0 })).toBe(1);
+    expect(attemptOf({ [ATTEMPT_HEADER]: "3" })).toBe(1);
   });
 });

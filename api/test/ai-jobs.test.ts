@@ -13,7 +13,7 @@ import {
 import { connect, type Channel, type ChannelModel } from "amqplib";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyAiJobEvent, publishPendingJobs } from "../src/ai-jobs.ts";
+import { applyAiJobEvent, failDeadLetteredJob, publishPendingJobs } from "../src/ai-jobs.ts";
 import { createApp } from "../src/app.ts";
 import { BOARD_ID } from "../src/board-id.ts";
 import { pool, query } from "../src/db.ts";
@@ -190,6 +190,18 @@ describe.skipIf(!process.env.DATABASE_URL)("Jobs do Agente de IA com PostgreSQL 
     expect(await jobRow(orphan.id)).toMatchObject({
       status: "failed", error: "A coluna de destino foi excluída antes de os cartões ficarem prontos.",
     });
+  });
+
+  it("comando na DLQ sem resultado marca o job como falho, mas não mexe em job terminado", async () => {
+    const stuck = AiJobSchema.parse((await postJob({ idempotencyKey: randomUUID() }).expect(202)).body);
+    await query("update ai_jobs set status = 'processing' where id = $1", [stuck.id]);
+    expect(await failDeadLetteredJob(stuck.id, "desistiu")).toBe(true);
+    expect(await jobRow(stuck.id)).toMatchObject({ status: "failed", error: "desistiu" });
+
+    const done = AiJobSchema.parse((await postJob({ idempotencyKey: randomUUID() }).expect(202)).body);
+    await applyAiJobEvent(generatedEvent({ jobId: done.id, correlationId: "x" }, ["Pronto"]));
+    expect(await failDeadLetteredJob(done.id, "desistiu")).toBe(false);
+    expect((await jobRow(done.id))?.status).toBe("succeeded");
   });
 });
 

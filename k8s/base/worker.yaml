@@ -1,0 +1,71 @@
+# Serviço B (consumidor): gera os cartões com o LLM.
+# Cada pod = worker + Ollama como sidecar nativo (initContainer com
+# restartPolicy: Always). O worker só inicia depois que o Ollama está pronto,
+# e a CPU da inferência é medida no próprio pod: é isso que o HPA observa.
+# Sem Service: o worker não recebe conexões, só consome a fila ai.generate.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: worker }
+  template:
+    metadata:
+      labels: { app: worker }
+    spec:
+      # O worker termina a geração em andamento antes de sair (até 30 s).
+      terminationGracePeriodSeconds: 45
+      initContainers:
+        - name: ollama
+          image: kanban-ai/ollama:local
+          imagePullPolicy: Never
+          restartPolicy: Always
+          env:
+            - name: OLLAMA_NUM_PARALLEL
+              value: "1"
+            - name: OLLAMA_CONTEXT_LENGTH
+              value: "4096"
+            # Threads de inferência = limite de CPU do container (ver ollama/entrypoint.sh).
+            - name: OLLAMA_NUM_THREADS
+              value: "2"
+          # Pronto só depois que o modelo foi configurado com as threads acima.
+          startupProbe:
+            exec: { command: ["test", "-f", "/tmp/ready"] }
+            periodSeconds: 3
+            failureThreshold: 40
+          # ~2 GiB é o uso real durante a geração (modelo de 1,4 GB + contexto).
+          # Reservar menos fazia o agendador aceitar réplicas que não cabiam.
+          # Limite de CPU = número de threads (OLLAMA_NUM_THREADS). Sem esse acerto, o
+          # Ollama abria 10 threads (uma por núcleo do nó) e era estrangulado pelo
+          # limite, ou disputava os núcleos com as outras réplicas; nos dois casos a
+          # geração caía para ~0,1 token/s. O HPA usa o "requests" (1 CPU) como 100%.
+          resources:
+            requests: { cpu: "1", memory: 2Gi }
+            limits: { cpu: "2", memory: 3Gi }
+      containers:
+        - name: worker
+          image: kanban-ai/worker:local
+          imagePullPolicy: Never
+          envFrom:
+            - configMapRef: { name: taskflow-config }
+          env:
+            - name: RABBITMQ_USER
+              valueFrom: { secretKeyRef: { name: taskflow-secrets, key: RABBITMQ_USER } }
+            - name: RABBITMQ_PASSWORD
+              valueFrom: { secretKeyRef: { name: taskflow-secrets, key: RABBITMQ_PASSWORD } }
+            - name: RABBITMQ_URL
+              value: amqp://$(RABBITMQ_USER):$(RABBITMQ_PASSWORD)@rabbitmq:5672
+            - name: LLM_API_KEY
+              valueFrom: { secretKeyRef: { name: taskflow-secrets, key: LLM_API_KEY, optional: true } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 256Mi }

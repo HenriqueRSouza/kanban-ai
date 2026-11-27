@@ -1,0 +1,28 @@
+# Variante com o LLM fora do cluster: LM Studio na máquina host ou OpenRouter.
+# O pod do worker perde o sidecar Ollama e passa a chamar a URL externa.
+#
+# Não aplique à mão: o scripts/k8s-up.sh escolhe este overlay quando o .env tem
+# LLM_PROVIDER=lmstudio ou openrouter, e gera o llm.env (fora do Git) a partir dele.
+#
+# Limitação: a inferência acontece fora do pod, então o worker passa o tempo
+# esperando HTTP com a CPU parada e o HPA por CPU (etapa 3) não reage.
+# Para demonstrar a elasticidade, use a base (Ollama dentro do pod).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+
+# Sobrescreve as chaves LLM_* do ConfigMap da base (o resto continua igual).
+configMapGenerator:
+  - name: taskflow-config
+    behavior: merge
+    envs: [llm.env]
+generatorOptions:
+  disableNameSuffixHash: true
+
+patches:
+  # Remove o sidecar Ollama (único initContainer do worker) e a reserva de 1 CPU e 2 GiB dele.
+  - target: { kind: Deployment, name: worker }
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/initContainers

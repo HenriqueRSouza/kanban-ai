@@ -1,0 +1,69 @@
+# RabbitMQ: componente com estado (filas duráveis em disco). StatefulSet de 1
+# réplica: o nome do pod (rabbitmq-0) é estável, e o RabbitMQ usa esse nome
+# para achar os próprios dados no volume depois de um restart.
+# Limitação didática: sem cluster de 3 nós, o broker é ponto único de falha.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels: { app: rabbitmq }
+spec:
+  selector: { app: rabbitmq }
+  ports:
+    - name: amqp
+      port: 5672
+    # Painel de gestão: só por "kubectl port-forward"; não está no Ingress.
+    - name: management
+      port: 15672
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels: { app: rabbitmq }
+  template:
+    metadata:
+      labels: { app: rabbitmq }
+    spec:
+      # Tudo roda como o usuário "rabbitmq" da imagem (100:101), inclusive a
+      # probe: rodando como root, ela criava o .erlang.cookie antes do servidor,
+      # com dono root, e o RabbitMQ caía com "eacces" na primeira inicialização.
+      securityContext:
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:4-management-alpine
+          ports:
+            - containerPort: 5672
+            - containerPort: 15672
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom: { secretKeyRef: { name: taskflow-secrets, key: RABBITMQ_USER } }
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom: { secretKeyRef: { name: taskflow-secrets, key: RABBITMQ_PASSWORD } }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/rabbitmq
+          readinessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 10
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 768Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

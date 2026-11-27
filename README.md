@@ -10,6 +10,20 @@ O usuário cria colunas e cartões, arrasta tudo com mouse, toque ou teclado, ed
 
 ---
 
+## Início rápido
+
+Pré-requisitos: Git e [Docker Desktop](https://www.docker.com/products/docker-desktop/) (com 8 GB de memória).
+
+```bash
+git clone https://github.com/HenriqueRSouza/kanban-ai.git
+cd kanban-ai
+cp .env.example .env            # Windows (cmd): copy .env.example .env
+docker compose up --build       # o primeiro build leva alguns minutos
+```
+
+Abra **http://localhost:8080**. O `.env` já vem pronto (nenhuma senha fica no código).
+Para o Kubernetes (etapas 2 e 3), veja [Kubernetes](#kubernetes-etapas-2-e-3).
+
 ## Projeto de Serviços de Nuvem
 
 Este repositório também é o projeto da disciplina **Serviços de Nuvem**

@@ -1,0 +1,42 @@
+# Etapa 3 — elasticidade do Serviço B (worker) com o HorizontalPodAutoscaler.
+# Fica fora do k8s/base de propósito: os experimentos da etapa 2 (self-healing
+# com 2 réplicas e "kubectl scale") vêm antes, e com o HPA ativo ele sobrescreveria
+# o número de réplicas escolhido à mão. Aplicar:  kubectl apply -f k8s/autoscaling/hpa.yaml
+#
+# Métrica: utilização de CPU do pod, em relação ao "requests" (1 CPU do Ollama +
+# 50m do worker). A inferência roda no sidecar Ollama, dentro do pod, então a fila
+# cheia vira CPU alta de verdade; com a fila vazia o pod fica ocioso.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker
+  namespace: taskflow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 1
+  # Cada réplica usa ~2 GiB (modelo + contexto). Com o Docker Desktop em 8 GB,
+  # o próprio Kubernetes e os outros componentes ficam com ~3 GB: cabem 2 réplicas.
+  # Com 3, o nó ficou sem memória (swap cheio) e o servidor da API travou.
+  # Com 12 GB ou mais para o Docker, dá para subir o teto:
+  #   kubectl -n taskflow patch hpa worker -p '{"spec":{"maxReplicas":3}}'
+  maxReplicas: 2
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+    scaleDown:
+      # Padrão do Kubernetes é 300 s; 60 s deixa a redução visível em sala.
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 30

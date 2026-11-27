@@ -1,0 +1,50 @@
+# Gerador de carga para a etapa 3: um Job que envia JOBS pedidos ao Agente de IA
+# entrando pelo NGINX Ingress Controller, como um cliente externo faria.
+# Roda dentro do cluster com a imagem da API (já tem Node), então funciona igual
+# em Windows, macOS e Linux, sem curl nem port-forward.
+# Use pelo script:  ./scripts/load.sh 30   (Windows: .\scripts\load.ps1 30)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: load
+  namespace: taskflow
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: load
+          image: kanban-ai/api:local
+          imagePullPolicy: Never
+          env:
+            - name: JOBS
+              value: "30"
+            - name: TARGET
+              value: http://ingress-nginx-controller.ingress-nginx.svc.cluster.local
+          command: ["node", "--input-type=module", "-e"]
+          args:
+            - |
+              const target = process.env.TARGET;
+              const total = Number(process.env.JOBS);
+              const board = await (await fetch(`${target}/api/board`)).json();
+              const column = board.columns[0].id;
+              const topics = ["exportar o quadro em CSV", "receber alertas de prazo", "arquivar cartões concluídos",
+                "filtrar cartões por responsável", "anexar arquivos aos cartões", "ver o histórico de cada cartão"];
+              let ok = 0;
+              for (let i = 1; i <= total; i++) {
+                const input = `Carga ${i}/${total}: como usuário quero ${topics[i % topics.length]} para organizar melhor o trabalho da equipe.`;
+                const res = await fetch(`${target}/api/ai/jobs`, {
+                  method: "POST",
+                  headers: { "content-type": "application/json", "x-request-id": `carga-${i}` },
+                  body: JSON.stringify({ input, targetColumnId: column, idempotencyKey: crypto.randomUUID(), maxCards: 3 }),
+                });
+                if (res.ok) ok++;
+                console.log(JSON.stringify({ event: "load.sent", n: i, status: res.status }));
+              }
+              console.log(JSON.stringify({ event: "load.done", sent: total, accepted: ok }));
+              if (ok !== total) process.exit(1);
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 128Mi }

@@ -62,6 +62,10 @@ kubectl config use-context "$PROFILE" >/dev/null
 step "Addons: NGINX Ingress Controller e metrics-server (usado pelo HPA)"
 minikube -p "$PROFILE" addons enable ingress
 minikube -p "$PROFILE" addons enable metrics-server
+# O navegador manda para "localhost" os cookies de outros apps já abertos nesse
+# endereço; com o padrão de 8 KB o Ingress responde "400 Cookie Too Large".
+kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
+  -p '{"data":{"large-client-header-buffers":"4 32k"}}'
 
 step "Imagens: build no Docker local e cópia para dentro do minikube"
 # As mesmas imagens do Compose. O build roda na arquitetura desta máquina

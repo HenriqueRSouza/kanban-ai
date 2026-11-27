@@ -53,6 +53,8 @@ Run kubectl config use-context $MkProfile
 Step "Addons: NGINX Ingress Controller e metrics-server"
 Run minikube -p $MkProfile addons enable ingress
 Run minikube -p $MkProfile addons enable metrics-server
+# Cookies grandes de outros apps em localhost: evita "400 Cookie Too Large" no Ingress.
+Run kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge -p "data: {large-client-header-buffers: '4 32k'}"
 
 Step "Imagens: build no Docker local e cópia para o minikube"
 if ($Provider -eq "ollama") { Run docker compose --profile ollama build } else { Run docker compose build nginx api worker }

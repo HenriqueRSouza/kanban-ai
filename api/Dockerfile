@@ -14,4 +14,6 @@ EXPOSE 3000
 # desligamento gracioso do serviço roda. Sem root dentro do container.
 USER node
 WORKDIR /app/api
-CMD ["node", "--import", "tsx", "src/server.ts"]
+# Cabeçalho de até 64 KB: no Kubernetes o Ingress repassa os cookies que o
+# navegador envia para localhost (de outros apps), e o padrão do Node é 16 KB.
+CMD ["node", "--max-http-header-size=65536", "--import", "tsx", "src/server.ts"]

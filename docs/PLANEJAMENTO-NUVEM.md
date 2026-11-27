@@ -1,5 +1,12 @@
 # TaskFlow — Planejamento do Projeto de Serviços em Nuvem
 
+> **Documento de planejamento (20/10/2026), mantido como histórico.** A solução
+> implementada mudou em alguns pontos durante os testes, por exemplo: HPA com
+> máximo de **2** réplicas (cada réplica usa ~2 GB), escala manual de 1 para 2,
+> Ollama com número fixo de threads e consumo da DLQ pela API. O que vale é:
+> [`ARQUITETURA.md`](ARQUITETURA.md) (arquitetura efetivamente implementada) e
+> [`EXPERIMENTOS.md`](EXPERIMENTOS.md) (roteiro e resultados observados).
+
 > **Disciplina:** Serviços em Nuvem — Engenharia da Computação (Mackenzie)
 > **Enunciado:** "Aplicação distribuída com containers, mensageria, orquestração e elasticidade"
 > **Repositório:** https://github.com/HenriqueRSouza/kanban-ai (separado do TaskFlow de Mobile)

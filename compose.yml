@@ -11,6 +11,7 @@
 
 services:
   nginx:
+    image: kanban-ai/web:local
     build:
       context: .
       dockerfile: nginx/Dockerfile
@@ -21,12 +22,15 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      # 127.0.0.1, não localhost: no Alpine, localhost resolve para ::1 (IPv6)
+      # e o NGINX só escuta em IPv4, então a verificação falhava sempre.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   api:
+    image: kanban-ai/api:local
     build:
       context: .
       dockerfile: api/Dockerfile
@@ -48,6 +52,7 @@ services:
       start_period: 10s
 
   worker:
+    image: kanban-ai/worker:local
     build:
       context: .
       dockerfile: worker/Dockerfile
@@ -108,13 +113,19 @@ services:
 
   ollama:
     profiles: [ollama]
+    image: kanban-ai/ollama:local
     build:
       context: ollama
       args:
         OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:1.7b}
+    # Threads de inferência (ver ollama/entrypoint.sh): usar todos os núcleos
+    # deixa a geração ~100x mais lenta. 4 serve para a maioria das máquinas.
+    environment:
+      OLLAMA_NUM_THREADS: ${OLLAMA_NUM_THREADS:-4}
     networks: [internal]
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      # Pronto só depois que o modelo foi configurado com as threads acima.
+      test: ["CMD", "test", "-f", "/tmp/ready"]
       interval: 10s
       timeout: 5s
       retries: 10

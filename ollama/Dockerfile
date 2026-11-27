@@ -8,4 +8,8 @@ RUN ollama serve >/tmp/ollama.log 2>&1 & \
     ollama pull "$OLLAMA_MODEL" && kill "$pid"
 # Mantém o modelo carregado na memória entre pedidos (o primeiro carregamento leva alguns segundos).
 ENV OLLAMA_KEEP_ALIVE=1h
+ENV OLLAMA_MODEL=$OLLAMA_MODEL
+COPY --chmod=755 entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD []
 EXPOSE 11434

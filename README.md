@@ -10,6 +10,26 @@ O usuário cria colunas e cartões, arrasta tudo com mouse, toque ou teclado, ed
 
 ---
 
+## Projeto de Serviços de Nuvem
+
+Este repositório também é o projeto da disciplina **Serviços de Nuvem**
+(aplicação distribuída com containers, mensageria, orquestração e elasticidade).
+O botão **"Agente de IA"** transforma um texto em cartões: o **Serviço A** (`api/`)
+publica o pedido no **RabbitMQ**, o **Serviço B** (`worker/`) consome e gera os
+cartões com um modelo de linguagem local (Ollama) e devolve o resultado também
+pela fila. A e B nunca se chamam diretamente, e o **NGINX** é o único ponto de entrada.
+
+| Etapa | Como rodar | Detalhes |
+|---|---|---|
+| 1. Docker Compose | `docker compose up --build` → http://localhost:8080 | [Como executar](#como-executar) |
+| 2. Kubernetes | `./scripts/k8s-up.sh` (Windows: `.\scripts\k8s-up.ps1`) | [Kubernetes](#kubernetes-etapas-2-e-3) |
+| 3. Elasticidade (HPA) | `kubectl apply -f k8s/autoscaling/hpa.yaml` e `./scripts/load.sh 30` | [Kubernetes](#kubernetes-etapas-2-e-3) |
+
+- **Arquitetura implementada** (componentes, fluxo, mensagens, rede, RabbitMQ, decisões do Kubernetes): [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md)
+- **Experimentos passo a passo**, com os resultados observados: [`docs/EXPERIMENTOS.md`](docs/EXPERIMENTOS.md)
+
+---
+
 ## Funcionalidades
 
 | | Funcionalidade |
@@ -61,6 +81,39 @@ O provedor do Agente de IA (Ollama, LM Studio ou OpenRouter) é escolhido no `.e
 > docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < api/migrations/006_ai_jobs.sql
 > ```
 
+### Kubernetes (etapas 2 e 3)
+
+Pré-requisitos: Docker Desktop, [minikube](https://minikube.sigs.k8s.io/docs/start/) e
+[kubectl](https://kubernetes.io/docs/tasks/tools/), com cerca de **8 GB de RAM** livres
+para o Docker (cada réplica do worker usa ~2 GB; em 8 GB cabem 2). Não precisa de internet depois do primeiro build nem de conta em nenhum serviço.
+
+```bash
+cp .env.example .env               # se ainda não existir
+./scripts/k8s-up.sh                # Windows (PowerShell): .\scripts\k8s-up.ps1
+```
+
+O script cria o cluster minikube (perfil `kanban-ai`), liga os addons `ingress` e
+`metrics-server`, constrói as imagens e as carrega no cluster, cria o Secret a
+partir do `.env`, aplica `k8s/base` e espera tudo ficar pronto. Pode ser executado
+de novo a qualquer momento (atualiza as imagens e reinicia os pods).
+
+Acesso pelo Ingress (deixe rodando em outro terminal):
+
+```bash
+kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8090:80   # → http://localhost:8090
+```
+
+| Experimento | Comando |
+|---|---|
+| Estado do cluster | `kubectl -n taskflow get deploy,sts,svc,ingress,pods` |
+| Self-healing | `kubectl -n taskflow delete pod <um-pod-worker>` e `kubectl -n taskflow get pods -l app=worker -w` |
+| Escala manual | `kubectl -n taskflow scale deployment/worker --replicas=1` e depois `--replicas=2` |
+| Elasticidade | `kubectl apply -f k8s/autoscaling/hpa.yaml`, `./scripts/load.sh 30` e `kubectl -n taskflow get hpa worker -w` |
+| Painel do RabbitMQ | `kubectl -n taskflow port-forward svc/rabbitmq 15672` → http://localhost:15672 |
+| Remover | `./scripts/k8s-down.sh` (só a aplicação) ou `./scripts/k8s-down.sh --all` (apaga o cluster) |
+
+O roteiro completo, com o que observar em cada passo, está em [`docs/EXPERIMENTOS.md`](docs/EXPERIMENTOS.md).
+
 ### Sem Docker (opcional)
 
 Requer Node.js 22, um PostgreSQL com as migrations de `api/migrations/` aplicadas e, para o Agente de IA, um RabbitMQ (as variáveis estão no fim do `.env.example`).
@@ -87,16 +140,16 @@ DATABASE_URL=postgres://taskflow:taskflow@localhost:5432/taskflow npm test -w ap
 ## Arquitetura
 
 ```
-┌──────────────────────── docker compose ─────────────────────────┐
-│                                                                 │
-│  ┌──────────────┐   HTTP/JSON   ┌───────────────┐  SQL  ┌──────┐ │
-│  │  web (Vite)  │ ────────────▶ │ api (Express) │ ────▶ │  db  │ │
-│  │  :5173       │ ◀──────────── │ :3000         │ ◀──── │  PG  │ │
-│  └──────┬───────┘               └───────────────┘       └──────┘ │
-└─────────┼───────────────────────────────────────────────────────┘
-          ▼
-   localStorage (quadro + fila de alterações pendentes)
+                       ┌─────────────────────── rede interna ────────────────────────┐
+ Navegador ──▶ NGINX ──┼─▶ api (Serviço A) ──▶ RabbitMQ ──▶ worker (Serviço B) ──▶ Ollama │
+   (único acesso)      │        │      ▲                         │                    │
+                       │        ▼      └──── resultado pela fila ┘                    │
+                       │    PostgreSQL                                                │
+                       └──────────────────────────────────────────────────────────────┘
+   No navegador: localStorage (quadro + fila de alterações pendentes, modo offline)
 ```
+
+Detalhes da arquitetura distribuída em [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md).
 
 | Camada | Tecnologias |
 |---|---|
@@ -107,24 +160,26 @@ DATABASE_URL=postgres://taskflow:taskflow@localhost:5432/taskflow npm test -w ap
 | Back-end | Node.js 22, Express 5, `pg` (SQL escrito à mão) |
 | Banco | PostgreSQL 16 |
 | Testes | Vitest, Testing Library, Supertest |
-| Infraestrutura | Docker e Docker Compose |
+| Mensageria | RabbitMQ 4 (filas quorum duráveis), `amqplib` |
+| Agente de IA | Ollama com `qwen3:1.7b` (ou LM Studio / OpenRouter) |
+| Infraestrutura | Docker, Docker Compose, Kubernetes (minikube), NGINX Ingress, HPA |
 
 ### Estrutura de pastas
 
 ```
-taskflow-kanban/
-├── packages/shared/     # schemas Zod e tipos usados pelo front e pela API
-├── web/src/
-│   ├── components/      # Board, Column, Card, CardDetails, TagPicker, TagFilterBar…
-│   ├── hooks/           # useInlineEdit, useBoardDnd, useBoardSync
-│   ├── store/           # boardStore (quadro) e filterStore (filtro)
-│   ├── data/            # BoardRepository, HttpBoardRepository, syncEngine
-│   └── lib/             # ordenação fracionária, cores das etiquetas, utilitários
-├── api/
-│   ├── src/routes/      # board, columns, cards, tags
-│   └── migrations/      # SQL: tabelas, dados de exemplo e trigger do histórico
-├── docs/PLANEJAMENTO.md # requisitos, arquitetura e cronograma
-└── docker-compose.yml
+kanban-ai/
+├── packages/shared/     # schemas Zod: dados do quadro e contratos das mensagens (messages.ts)
+├── web/src/             # front-end React (components, hooks, store, data, lib)
+├── api/                 # Serviço A: rotas, outbox e mensageria (src/messaging), migrations SQL
+├── worker/              # Serviço B: consumidor, cliente do LLM e prompt
+├── nginx/               # imagem do ponto de entrada (front estático + proxy /api)
+├── ollama/              # imagem do Ollama com o modelo embutido
+├── k8s/base/            # manifestos Kubernetes (kustomize)
+├── k8s/autoscaling/     # HPA do worker e Job gerador de carga (etapa 3)
+├── k8s/overlays/        # external-llm: worker sem sidecar (LM Studio / OpenRouter)
+├── scripts/             # k8s-up, k8s-down e load (bash e PowerShell)
+├── docs/                # ARQUITETURA.md, EXPERIMENTOS.md e planejamentos
+└── compose.yml          # etapa 1 (+ compose.debug.yml e compose.external-llm.yml)
 ```
 
 ## Decisões técnicas
@@ -158,5 +213,7 @@ from card_events where card_id = '<id do cartão>' order by occurred_at;
 | PUT / DELETE | `/api/cards/:id` | Cria/atualiza ou exclui um cartão (inclui suas etiquetas) |
 | GET | `/api/cards/:id/history` | Histórico de movimentação do cartão (criação e trocas de coluna) |
 | PUT / DELETE | `/api/tags/:id` | Cria/atualiza ou exclui uma etiqueta |
+| POST | `/api/ai/jobs` | Cria um pedido ao Agente de IA (`202`; idempotente pela `idempotencyKey`) |
+| GET | `/api/ai/jobs/:id` | Status do pedido: `pending_publish`, `queued`, `processing`, `succeeded` ou `failed` |
 
 Erros retornam `{ "error": "mensagem" }` com status `400` (dados inválidos), `409` (coluna ou etiqueta inexistente) ou `500`.
